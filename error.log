@@ -1,0 +1,50 @@
+2025-03-08 18:34:52,721 - ERROR - 프로그램 구동 시작
+2025-03-08 18:38:07,098 - ERROR - 프로그램 구동 시작
+2025-03-08 18:38:33,229 - ERROR - No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "C:\autotrade\webui\backend\venv\lib\site-packages\telegram\ext\dispatcher.py", line 557, in process_update
+    handler.handle_update(update, self, check, context)
+  File "C:\autotrade\webui\backend\venv\lib\site-packages\telegram\ext\handler.py", line 199, in handle_update
+    return self.callback(update, context)
+  File "C:\autotrade\webui\backend\app\trade.py", line 2227, in onoff
+    self.check_status()
+  File "C:\autotrade\webui\backend\app\trade.py", line 478, in check_status
+    time_diff = now - self.last_check_time
+AttributeError: 'coin_trading' object has no attribute 'last_check_time'
+2025-03-08 18:38:37,625 - ERROR - No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "C:\autotrade\webui\backend\venv\lib\site-packages\telegram\ext\dispatcher.py", line 557, in process_update
+    handler.handle_update(update, self, check, context)
+  File "C:\autotrade\webui\backend\venv\lib\site-packages\telegram\ext\handler.py", line 199, in handle_update
+    return self.callback(update, context)
+  File "C:\autotrade\webui\backend\app\trade.py", line 2227, in onoff
+    self.check_status()
+  File "C:\autotrade\webui\backend\app\trade.py", line 478, in check_status
+    time_diff = now - self.last_check_time
+AttributeError: 'coin_trading' object has no attribute 'last_check_time'
+2025-03-08 18:41:23,943 - ERROR - 프로그램 구동 시작
+2025-03-08 18:41:29,046 - ERROR - No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "C:\autotrade\webui\backend\venv\lib\site-packages\telegram\ext\dispatcher.py", line 557, in process_update
+    handler.handle_update(update, self, check, context)
+  File "C:\autotrade\webui\backend\venv\lib\site-packages\telegram\ext\handler.py", line 199, in handle_update
+    return self.callback(update, context)
+  File "C:\autotrade\webui\backend\app\trade.py", line 2227, in onoff
+    self.check_status()
+  File "C:\autotrade\webui\backend\app\trade.py", line 478, in check_status
+    time_diff = now - self.last_check_time
+AttributeError: 'coin_trading' object has no attribute 'last_check_time'
+2025-03-08 19:06:18,066 - ERROR - 프로그램 구동 시작
+2025-03-08 19:08:35,877 - ERROR - 프로그램 구동 시작
+2025-03-08 19:11:25,837 - ERROR - 프로그램 구동 시작
+2025-03-08 19:11:34,927 - ERROR - No error handlers are registered, logging exception.
+Traceback (most recent call last):
+  File "C:\autotrade\webui\backend\venv\lib\site-packages\telegram\ext\dispatcher.py", line 557, in process_update
+    handler.handle_update(update, self, check, context)
+  File "C:\autotrade\webui\backend\venv\lib\site-packages\telegram\ext\handler.py", line 199, in handle_update
+    return self.callback(update, context)
+  File "C:\autotrade\webui\backend\app\trade.py", line 2233, in onoff
+    self.check_status()
+  File "C:\autotrade\webui\backend\app\trade.py", line 484, in check_status
+    time_diff = now - self.last_check_time
+AttributeError: 'coin_trading' object has no attribute 'last_check_time'
