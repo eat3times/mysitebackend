@@ -8,6 +8,9 @@ from app.database import get_db
 from app.trade import router as trade_router
 from sqlalchemy.orm import Session
 import json
+from app.global_state import active_tasks
+import asyncio
+import aioredis
 
 app = FastAPI()
 
@@ -26,22 +29,29 @@ app.add_middleware(
 # OAuth2PasswordBearer는 Authorization 헤더에서 Bearer 토큰을 가져오는 역할을 합니다.
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
+# Redis Pub/Sub 기반 WebSocket 엔드포인트
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     await websocket.accept()
+    # aioredis 2.x 버전 사용: from_url 함수를 이용해 Redis 클라이언트 생성
+    redis = aioredis.from_url("redis://localhost", encoding="utf-8", decode_responses=True)
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(f"trade_output_channel:{user_id}")
     try:
         while True:
-            # 클라이언트로부터 메세지를 기다림
-            data = await websocket.receive_text()
-            
-            # 서버가 처리한 결과를 JSON 형식으로 클라이언트에 전송
-            response_data = {
-                "message": f"Hello {user_id}, your message: {data}",
-                "user_id": user_id
-            }
-            await websocket.send_text(json.dumps(response_data))  # JSON으로 전송
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message:
+                await websocket.send_text(message['data'])
+            else:
+                await asyncio.sleep(0.1)
     except WebSocketDisconnect:
-        print(f"User {user_id} disconnected")
+        print(f"WebSocket 연결이 종료되었습니다: {user_id}")
+    except Exception as e:
+        print(f"WebSocket 연결 오류: {repr(e)}")
+    finally:
+        await pubsub.unsubscribe(f"trade_output_channel:{user_id}")
+        await pubsub.close()
+        await redis.close()
 
 # JWT 토큰을 검증하는 함수
 def get_current_user(token: str = Depends(oauth2_scheme)):

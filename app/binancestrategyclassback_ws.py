@@ -11,22 +11,22 @@ import websockets
 import json
 import app.curprice
 
-current_dir = os.path.dirname(os.path.abspath(__file__))  # 현재 파일의 절대 경로
-api_file_path = os.path.join(current_dir, "api.txt")  # 파일 경로 결합
+# current_dir = os.path.dirname(os.path.abspath(__file__))  # 현재 파일의 절대 경로
+# api_file_path = os.path.join(current_dir, "api.txt")  # 파일 경로 결합
 
-with open(api_file_path) as f:
-    lines = f.readlines()
-    api_key = lines[0].strip()
-    secret  = lines[1].strip()
+# with open(api_file_path) as f:
+#     lines = f.readlines()
+#     api_key = lines[0].strip()
+#     secret  = lines[1].strip()
 
-exchange = ccxt.binance(config={
-    'apiKey': api_key, 
-    'secret': secret,
-    'enableRateLimit': True,
-    'options': {
-        'defaultType': 'future'
-    }
-})
+# exchange = ccxt.binance(config={
+#     'apiKey': api_key, 
+#     'secret': secret,
+#     'enableRateLimit': True,
+#     'options': {
+#         'defaultType': 'future'
+#     }
+# })
 class Fib_target:
     def __init__(self,symbol):
         self.recommend_list = ['추천 포지션','추천 포지션']
@@ -114,7 +114,7 @@ class Fib_target:
             time.sleep(delay)
             delay *= 2  # 지수 백오프
         raise Exception("최대 재시도 횟수 초과")
-    def cal_target_mixed(self,symbol,period,timeframe,fib_level):
+    def cal_target_mixed(self,exchange,symbol,period,timeframe,fib_level):
         self.symbol = symbol
         self.period = period
         self.timeframe = timeframe

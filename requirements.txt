@@ -13,3 +13,4 @@ celery
 aiohttp
 sqlalchemy
 pydantic
+aioredis

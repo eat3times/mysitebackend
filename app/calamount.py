@@ -9,21 +9,8 @@ import os
 symbols_url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 leverage_url = "https://fapi.binance.com/fapi/v1/leverageBracket"
 
-current_dir = os.path.dirname(os.path.abspath(__file__))  # 현재 파일의 절대 경로
-api_file_path = os.path.join(current_dir, "api.txt")  # 파일 경로 결합
-
-with open(api_file_path) as f:
-    lines = f.readlines()
-    API_KEY = lines[0].strip()
-    API_SECRET  = lines[1].strip()
-
-# 요청 헤더에 API 키 추가
-headers = {
-    'X-MBX-APIKEY': API_KEY
-}
-
-def generate_signature(query_string):
-    return hmac.new(API_SECRET.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+def generate_signature(query_string, api_secret: str):
+    return hmac.new(api_secret.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
 
 def get_valid_symbols():
     response = requests.get(symbols_url)
@@ -35,11 +22,12 @@ def get_valid_symbols():
         print(f"Error fetching symbols: {response.status_code}")
         return []
 
-def get_max_position_by_leverage(symbol):
+def get_max_position_by_leverage(symbol, api_key, api_secret):
     # 현재 시간의 timestamp를 밀리초 단위로 가져옴
+    headers = {'X-MBX-APIKEY': api_key}
     timestamp = int(time.time() * 1000)
     query_string = f"symbol={symbol}&timestamp={timestamp}"
-    signature = generate_signature(query_string)
+    signature = generate_signature(query_string, api_secret)
 
     request_url = f"{leverage_url}?{query_string}&signature={signature}"
 
@@ -89,10 +77,10 @@ valid_symbols = get_valid_symbols()
 #             min_usdt = bracket['min_notional_value']
 #             print(f"레버리지 {leverage}배: 최소 {min_usdt} USDT ~ 최대 {max_usdt} USDT 진입 가능")
 
-def cur_leverage_max_amount(cur_price, symbol, leverage, decimal_place_min_qty):
+def cur_leverage_max_amount(cur_price, symbol, leverage, decimal_place_min_qty, api_key: str, api_secret: str):
     if valid_symbols:
         modified_symbol = symbol.replace('/', '')
-        leverage_brackets = get_max_position_by_leverage(modified_symbol)
+        leverage_brackets = get_max_position_by_leverage(modified_symbol, api_key, api_secret)
         max_amount = 1
         if leverage_brackets:
             for bracket in leverage_brackets:

@@ -28,8 +28,18 @@ redis-cli ping
 
 git status
 git add src/App.js
-git commit -m "app.js 수정: symbols 데이터를 딕셔너리 형태로 변환하여 Celery에 전달하도록 수정"
+git commit -m 
 git push origin main
 
-프리 티어: In your first year of opening an AWS account, you get 750 hours per month of t2.micro instance usage (or t3.micro where t2.micro isn't available) 
-when used with free tier AMIs, 750 hours per month of public IPv4 address usage, 30 GiB of EBS storage, 2 million I/Os, 1 GB of snapshots, and 100 GB of bandwidth to the internet.
+curl http://52.63.90.234:8000
+cd mysitebackend
+source venv/bin/activate
+
+tmux new -s fastapi
+tmux attach
+gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 4
+
+cd /c/autotrade/webui
+ssh -i ec2backend.pem ubuntu@54.206.216.17
+
+REACT_APP_API_URL=https://54.206.216.17:8000

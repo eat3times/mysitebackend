@@ -34,6 +34,7 @@ from celery.result import AsyncResult
 from celery.exceptions import Ignore
 from typing import Dict, List
 import redis
+from app.global_state import active_tasks
 
 # APIRouter 생성
 router = APIRouter()
@@ -56,8 +57,6 @@ logging.error(f"프로그램 구동 시작")
 
 current_dir = os.path.dirname(os.path.abspath(__file__))  # 현재 파일의 절대 경로
 api_file_path = os.path.join(current_dir, "api.txt")  # 파일 경로 결합
-
-realized_pnl = [0]
 
 # 역방향 매매 작동 on off 스위치
 posi_R = 'on'
@@ -185,10 +184,10 @@ class coin_trading:
         self.target_1272_2, self.target_113_2, self.target_1_2, self.new_recommend, self.fibRe2,\
         self.long_target_2, self.short_target_2, self.Sub_target_2, self.Last_target_2,\
         self.TP_1st_2, self.TP_2nd_2, self.SL_1st_2, self.target_2, self.target_2_2,self.target_213,self.target_213_2,\
-        self.Sub_TP, self.decimal_place,self.list_1618,self.num_high, self.num_low, self.df = self.fib_target.cal_target_mixed(self.symbol,self.period,self.timeframe,self.fib_level)
+        self.Sub_TP, self.decimal_place,self.list_1618,self.num_high, self.num_low, self.df = self.fib_target.cal_target_mixed(self.exchange,self.symbol,self.period,self.timeframe,self.fib_level)
 
         if self.cur_price and self.cur_price > 0:
-            self.max_amount = app.calamount.cur_leverage_max_amount(self.cur_price, self.symbol, self.leverage, self.decimal_place_min_qty)
+            self.max_amount = app.calamount.cur_leverage_max_amount(self.cur_price, self.symbol, self.leverage, self.decimal_place_min_qty, self.api_key, self.api_secret)
         else:
             logging.warning(f"cur_price 값이 이상함: {self.cur_price}")
 
@@ -459,6 +458,35 @@ class coin_trading:
         """해당 인스턴스의 로그 파일 삭제"""
         print(f"Exit command received for {self.symbol}")
         self.logger.delete_file()
+    
+    async def send_trade_update(self):
+        # 거래 데이터 구성 (여기서 self는 trade 관련 인스턴스)
+        # 현재 UTC 시간 가져오기
+        utc_now = datetime.utcnow()
+        # UTC 시간에 9시간 더해 한국 시간으로 변환
+        kst_now = utc_now + timedelta(hours=9)
+        self.trade_data = {
+            "free_usdt": round(self.free_usdt, 2),
+            "unlimited_max_amount": f"{self.unlimited_max_amount} {self.unit}",
+            "max_amount": f"{self.max_amount} {self.unit}",
+            "split_amount": f"{self.split_amount} {self.unit}",
+            "amount": f"{self.amount} {self.unit}",
+            "highprice_info": f"{self.alram_date1}  ${self.highprice}",
+            "lowprice_info": f"{self.alram_date2}  ${self.lowprice}",
+            "fib_info": f"{self.fibRe, self.recommend}",
+            "fib_info2": f"{self.fibRe2, self.new_recommend}",
+            "target_1618": f"{self.unit} 1.618 값은 : ${self.target_1618}, ${self.target_1618_2}",
+            "price_info": f"{self.unit}의 현재가 = ${self.cur_price} 목표 조건 부합 가격 = ${self.targetprice}",
+            "timestamp": kst_now.strftime('%Y-%m-%d %H:%M:%S'),
+            "TP": self.TP_1st
+        }
+        # Redis에 trade_data 저장 (예: key: trade_output:abc)
+        # redis_client.set(f"trade_output:{self.user_id}:{self.modified_symbol}", json.dumps(self.trade_data))
+        message = json.dumps({
+            "trade_output": self.trade_data,
+            "symbol": self.modified_symbol
+        })
+        redis_client.publish(f"trade_output_channel:{self.user_id}", message)
     
     # 일정 주기로 데이터들을 업데이트
     @wrap_task()
@@ -1936,12 +1964,12 @@ class coin_trading:
                     if self.pnl_usdt and sum(self.pnl_usdt) > 0:
                         self.total_pnl = round(sum(self.pnl_usdt), 4)    
                         self.total_pnl = round(self.total_pnl - self.total_fees,4)
-                        realized_pnl[0] = round(realized_pnl[0] + self.total_pnl,4)
+                        active_tasks[self.user_id]["realizedPnl"] = round(active_tasks[self.user_id]["realizedPnl"] + self.total_pnl,4)
                         self.transfer_usdt = round(self.total_pnl / 3,4)
                         if self.transfer_usdt > 0:
                             self.exchange.transfer('USDT', self.transfer_usdt,'future','spot')
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.transfer_usdt}$ 전송완료 !!!\
-                            \n실현손익 : {self.total_pnl}$\n차감된 수수료 : {self.total_fees}$\n오늘 총 실현손익 : {realized_pnl[0]}$')
+                            \n실현손익 : {self.total_pnl}$\n차감된 수수료 : {self.total_fees}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$')
                             self.total_pnl = 0 
                             self.transfer_usdt = 0
                             self.total_fees = 0
@@ -1951,7 +1979,7 @@ class coin_trading:
                         await asyncio.sleep(2)
                 else:
                     self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n발견된 실현손익이 없습니다\npnl_usdt : {self.pnl_usdt}\
-                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {realized_pnl[0]}$\ntime : {self.timestamp}')
+                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\ntime : {self.timestamp}')
                     self.total_fees = 0
                     self.position['transfer'] = None
             if self.position_2['transfer'] == 'on' and self.timestamp > 0:
@@ -1969,12 +1997,12 @@ class coin_trading:
                     if self.pnl_usdt and sum(self.pnl_usdt) > 0:
                         self.total_pnl = round(sum(self.pnl_usdt), 4)    
                         self.total_pnl = round(self.total_pnl - self.total_fees,4)
-                        realized_pnl[0] = round(realized_pnl[0] + self.total_pnl,4)
+                        active_tasks[self.user_id]["realizedPnl"] = round(active_tasks[self.user_id]["realizedPnl"] + self.total_pnl,4)
                         self.transfer_usdt = round(self.total_pnl / 3,4)
                         if self.transfer_usdt > 0:
                             self.exchange.transfer('USDT', self.transfer_usdt,'future','spot')
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.transfer_usdt}$ 전송완료 !!!\
-                            \n실현손익 : {self.total_pnl}$\n차감된 수수료 : {self.total_fees}$\n오늘 총 실현손익 : {realized_pnl[0]}$')
+                            \n실현손익 : {self.total_pnl}$\n차감된 수수료 : {self.total_fees}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$')
                             self.total_pnl = 0 
                             self.transfer_usdt = 0
                             self.total_fees = 0
@@ -1984,7 +2012,7 @@ class coin_trading:
                         await asyncio.sleep(2)
                 else:
                     self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n발견된 실현손익이 없습니다\npnl_usdt : {self.pnl_usdt}\
-                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {realized_pnl[0]}$\ntime : {self.timestamp}')
+                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\ntime : {self.timestamp}')
                     self.total_fees = 0
                     self.position_2['transfer'] = None
             if self.position_R['transfer'] == 'on' and self.timestamp > 0:
@@ -2002,12 +2030,12 @@ class coin_trading:
                     if self.pnl_usdt and sum(self.pnl_usdt) > 0:
                         self.total_pnl = round(sum(self.pnl_usdt), 4)    
                         self.total_pnl = round(self.total_pnl - self.total_fees,4)
-                        realized_pnl[0] = round(realized_pnl[0] + self.total_pnl,4)
+                        active_tasks[self.user_id]["realizedPnl"] = round(active_tasks[self.user_id]["realizedPnl"] + self.total_pnl,4)
                         self.transfer_usdt = round(self.total_pnl / 3,4)
                         if self.transfer_usdt > 0:
                             self.exchange.transfer('USDT', self.transfer_usdt,'future','spot')
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.transfer_usdt}$ 전송완료 !!!\
-                            \n실현손익 : {self.total_pnl}$\n차감된 수수료 : {self.total_fees}$\n오늘 총 실현손익 : {realized_pnl[0]}$')
+                            \n실현손익 : {self.total_pnl}$\n차감된 수수료 : {self.total_fees}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$')
                             self.total_pnl = 0 
                             self.transfer_usdt = 0
                             self.total_fees = 0
@@ -2017,7 +2045,7 @@ class coin_trading:
                         await asyncio.sleep(2)
                 else:
                     self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n발견된 실현손익이 없습니다\npnl_usdt : {self.pnl_usdt}\
-                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {realized_pnl[0]}$\ntime : {self.timestamp}')
+                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\ntime : {self.timestamp}')
                     self.total_fees = 0
                     self.position_R['transfer'] = None
             # 손절 금액 알림 메세지
@@ -2036,9 +2064,9 @@ class coin_trading:
                     if self.pnl_usdt:
                         self.total_pnl = round(sum(self.pnl_usdt), 4)    
                         self.total_pnl = round(self.total_pnl - self.total_fees,4)
-                        realized_pnl[0] = round(realized_pnl[0] + self.total_pnl,4)
+                        active_tasks[self.user_id]["realizedPnl"] = round(active_tasks[self.user_id]["realizedPnl"] + self.total_pnl,4)
                         self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n손절금액 : {self.total_pnl}$ ㅠㅠ\
-                        \n오늘 총 실현손익 : {realized_pnl[0]}$\n차감된 총 수수료 : {self.total_fees}$')
+                        \n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\n차감된 총 수수료 : {self.total_fees}$')
                         self.total_pnl = 0
                         self.total_fees = 0
                         self.position['stoploss'] = None
@@ -2049,7 +2077,7 @@ class coin_trading:
                         await asyncio.sleep(2)
                 else:
                     self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n발견된 손실금액이 없습니다\npnl_usdt : {self.pnl_usdt}\
-                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {realized_pnl[0]}$\ntime : {self.timestamp}')
+                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\ntime : {self.timestamp}')
                     if self.position['type'] == "half_cooling":
                         self.position['type'] = None
                     self.total_fees = 0
@@ -2069,9 +2097,9 @@ class coin_trading:
                     if self.pnl_usdt:
                         self.total_pnl = round(sum(self.pnl_usdt), 4)    
                         self.total_pnl = round(self.total_pnl - self.total_fees,4)
-                        realized_pnl[0] = round(realized_pnl[0] + self.total_pnl,4)
+                        active_tasks[self.user_id]["realizedPnl"] = round(active_tasks[self.user_id]["realizedPnl"] + self.total_pnl,4)
                         self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n손절금액 : {self.total_pnl}$ ㅠㅠ\
-                        \n오늘 총 실현손익 : {realized_pnl[0]}$\n차감된 총 수수료 : {self.total_fees}$')
+                        \n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\n차감된 총 수수료 : {self.total_fees}$')
                         self.total_pnl = 0
                         self.total_fees = 0
                         self.position_2['stoploss'] = None
@@ -2082,7 +2110,7 @@ class coin_trading:
                         await asyncio.sleep(2)
                 else:
                     self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n발견된 손실금액이 없습니다\npnl_usdt : {self.pnl_usdt}\
-                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {realized_pnl[0]}$\ntime : {self.timestamp}')
+                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\ntime : {self.timestamp}')
                     if self.position_2['type'] == "half_cooling":
                         self.position_2['type'] = None
                     self.total_fees = 0
@@ -2102,9 +2130,9 @@ class coin_trading:
                     if self.pnl_usdt:
                         self.total_pnl = round(sum(self.pnl_usdt), 4)    
                         self.total_pnl = round(self.total_pnl - self.total_fees,4)
-                        realized_pnl[0] = round(realized_pnl[0] + self.total_pnl,4)
+                        active_tasks[self.user_id]["realizedPnl"] = round(active_tasks[self.user_id]["realizedPnl"] + self.total_pnl,4)
                         self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n손절금액 : {self.total_pnl}$ ㅠㅠ\
-                        \n오늘 총 실현손익 : {realized_pnl[0]}$\n차감된 총 수수료 : {self.total_fees}$')
+                        \n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\n차감된 총 수수료 : {self.total_fees}$')
                         self.total_pnl = 0
                         self.total_fees = 0
                         self.position_R['stoploss'] = None
@@ -2115,7 +2143,7 @@ class coin_trading:
                         await asyncio.sleep(2)
                 else:
                     self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n발견된 손실금액이 없습니다\npnl_usdt : {self.pnl_usdt}\
-                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {realized_pnl[0]}$\ntime : {self.timestamp}')
+                    \n실현손익 : {self.total_pnl}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\ntime : {self.timestamp}')
                     if self.position_R['type'] == "half_cooling":
                         self.position_R['type'] = None
                     self.total_fees = 0
@@ -2144,7 +2172,7 @@ class coin_trading:
                 self.target_1272_2, self.target_113_2, self.target_1_2, self.new_recommend, self.fibRe2,\
                 self.long_target_2, self.short_target_2, self.Sub_target_2, self.Last_target_2,\
                 self.TP_1st_2, self.TP_2nd_2, self.SL_1st_2, self.target_2, self.target_2_2,self.target_213,self.target_213_2,\
-                self.Sub_TP, self.decimal_place,self.list_1618,self.num_high, self.num_low, self.df = self.fib_target.cal_target_mixed(self.symbol,self.period,self.timeframe,self.fib_level)
+                self.Sub_TP, self.decimal_place,self.list_1618,self.num_high, self.num_low, self.df = self.fib_target.cal_target_mixed(self.exchange,self.symbol,self.period,self.timeframe,self.fib_level)
                 
                 # 역방향 가격 세팅
                 self.target_cal = (self.Sub_rtarget + self.reverse_target)/2
@@ -2209,6 +2237,7 @@ class coin_trading:
                 else:
                     print('사용 가능한 잔고가 없습니다.')
                     await asyncio.sleep(5)
+                await self.send_trade_update()
             await asyncio.sleep(0.3)
             
     # 텔레그램 봇 조건 메세지
@@ -2359,7 +2388,6 @@ class SymbolRequest(BaseModel):
 
 # 비동기 트레이딩 시작 API 엔드포인트
 
-active_tasks = {}
 user_bots = {}  # 사용자별 봇 정보를 저장할 딕셔너리
 
 # 현재 사용자 자동매매 상태 조회
@@ -2469,7 +2497,7 @@ def start_trading_task(self, user_id: str, symbols: List[SymbolItem], telegram_t
         trading_tasks.append(task)
 
     print(f"✅ [{user_id}] 자동매매 시작...")
-    user_bot.sendMessage(chat_id=user_bot_id, text= f'✅ 알림\n자동매매 프로그램이 시작되었습니다.\
+    user_bot.sendMessage(chat_id=user_bot_id, text= f'✅ 알림\n[{user_id}]의 자동매매 프로그램이 시작되었습니다.\
     \n시작 잔고 : {round(coin_trader.total_usdt,2)}$')
 
     # # asyncio 작업 생성
@@ -2477,15 +2505,14 @@ def start_trading_task(self, user_id: str, symbols: List[SymbolItem], telegram_t
     # second_task = asyncio.run_coroutine_threadsafe(second_coin.run(user_id, symbol_request), loop)
 
     # Celery 작업과 asyncio Task 저장
-    active_tasks[user_id] = {
-        "bot_instance": coin_trader,
-        'celery_task': self.request.id,
-        'asyncio_tasks': trading_tasks,
-        'loop': loop,
-        'realizedPnl' : 0
-    }
-
-    user_bot.sendMessage(chat_id=user_bot_id, text= f"✅ [{user_id}] 자동매매 시작...")
+    print(active_tasks)
+    active_tasks.setdefault(user_id, {}).update({
+    "bot_instance": coin_trader,
+    "celery_task": self.request.id,
+    "asyncio_tasks": trading_tasks,
+    "loop": loop,
+    "realizedPnl": 0
+    })
 
     return {"status": "completed", "user_id": user_id, "symbols": symbols}
     
@@ -2573,13 +2600,13 @@ async def start_trade(user_id: str, symbols: List[SymbolItem], db: Session = Dep
     if user.is_trading:
         return {"message": "이미 자동매매가 진행 중입니다."}
     
-    if user_id in active_tasks:
-        return {"message": "이미 자동매매가 실행 중입니다."}
+    # if user_id in active_tasks:
+    #     return {"message": "이미 자동매매가 실행 중입니다."}
     
     # Telegram Bot 정보 가져오기
     telegram_token = user.telegram_token
     telegram_bot_id = user.telegram_bot_id
-    binance_key= user.binance_key,
+    binance_key= user.binance_key
     binance_secret= user.binance_secret
     binance_symbols = await get_binance_symbols()
 
@@ -2623,9 +2650,25 @@ async def stop_trade(user_id: str, db: Session = Depends(get_db)):
     user.is_trading = False
     db.commit()
     
+    # Redis에 저장된 trade_output 데이터를 삭제합니다.
+    # keys = redis_client.keys(f"trade_output:{user_id}:*")
+    # for key in keys:
+    #     redis_client.delete(key)
+
     # Celery 작업 시작
     stop_task = stop_trading_task.apply_async(args=[user_id])
     return {"message": "자동매매 중지 요청이 완료되었습니다.", "task_id": stop_task.id}
-    
+
+@router.get("/trade_output/{user_id}")
+async def get_trade_output(user_id: str, symbol: str = None):
+    if symbol:
+        output = redis_client.get(f"trade_output:{user_id}:{symbol}")
+    else:
+        output = redis_client.get(f"trade_output:{user_id}")
+    if output:
+        return {"trade_output": json.loads(output)}
+    else:
+        return {"trade_output": None}
+
 if __name__ == "__main__":
     print("📢 Trade 모듈 실행됨!") 
