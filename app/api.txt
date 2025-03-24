@@ -27,7 +27,7 @@ celery -A celery_config.celery_app worker --loglevel=info
 redis-cli ping
 
 git status
-git add src/App.js
+git add .
 git commit -m 
 git push origin main
 
@@ -40,6 +40,8 @@ tmux attach
 gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 4
 
 cd /c/autotrade/webui
+chmod 600 ec2backend.pem
 ssh -i ec2backend.pem ubuntu@54.206.216.17
+cd mysitebackend
 
 REACT_APP_API_URL=https://54.206.216.17:8000
