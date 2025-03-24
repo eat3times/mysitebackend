@@ -14,3 +14,4 @@ aiohttp
 sqlalchemy
 pydantic
 aioredis
+argon2_cffi

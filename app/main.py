@@ -83,3 +83,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
 @app.post("/login")
 def login(user: schemas.UserLogin, db: Session = Depends(get_db)):
     return auth.login_user(user, db)
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to My site"}

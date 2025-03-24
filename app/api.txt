@@ -29,6 +29,7 @@ redis-cli ping
 git status
 git add .
 git commit -m 
+git pull origin main
 git push origin main
 
 curl http://52.63.90.234:8000
@@ -43,5 +44,6 @@ cd /c/autotrade/webui
 chmod 600 ec2backend.pem
 ssh -i ec2backend.pem ubuntu@54.206.216.17
 cd mysitebackend
+git pull origin main
 
 REACT_APP_API_URL=https://54.206.216.17:8000
