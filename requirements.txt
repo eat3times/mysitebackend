@@ -15,3 +15,4 @@ sqlalchemy
 pydantic
 aioredis
 argon2_cffi
+sqlalchemy psycopg2-binary

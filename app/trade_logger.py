@@ -1,71 +1,68 @@
-import json
-import os
 from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, JSON
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+Base = declarative_base()
+
+class Trade(Base):
+    __tablename__ = 'trades'
+
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    name = Column(String, nullable=False)
+    symbol = Column(String, nullable=False) 
+    data = Column(JSON, nullable=False)
+    instance_id = Column(String, nullable=False)
 
 class TradeLogger:
-    def __init__(self, filename):
-        self.filename = filename
-        self.directory = os.path.join(os.path.dirname(__file__), "logs")  # logs 폴더에 저장하도록 설정
-        os.makedirs(self.directory, exist_ok=True)  # 폴더가 없으면 생성
+    def __init__(self, db_path, instance_id):
+        self.engine = create_engine(f"sqlite:///{db_path}")
+        self.Session = sessionmaker(bind=self.engine)
+        self.instance_id = instance_id
 
-        # 저장할 파일 경로 설정
-        self.filename = os.path.join(self.directory, filename)
-        self.trades = self.load_trades()
+        Base.metadata.create_all(self.engine)
 
-    def load_trades(self):
-        """ 이전 거래 기록 불러오기 """
-        if os.path.exists(self.filename):
-            with open(self.filename, "r") as file:
-                return json.load(file)
-        return []
+    def save_trade_dict(self, symbol, **trade_dicts):
+        session = self.Session()
 
-    def save_trade(self, symbol, side, amount, price, status, period):
-        """ 거래 기록 저장 """
-        trade = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "period": period,
-            "symbol": symbol,
-            "side": side,
-            "amount": amount,
-            "avgpric": price,
-            "type": status
-        }
-        self.trades.append(trade)
-        
-        with open(self.filename, "w") as file:
-            json.dump(self.trades, file, indent=4)
-    
-    def save_trade_dict(self, trade_data,trade_data2,trade_data3):
-        """ 거래 기록 저장 """
-        # trade_data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # trade_data["name"] = 'position'
-        # trade_data2["name"] = 'position_2'
-        # trade_data3["name"] = 'position_R'
-        
-        self.trades = [trade_data, trade_data2, trade_data3]
-        
-        with open(self.filename, "w") as file:
-            json.dump(self.trades, file, indent=4)
+        for name, trade_data in trade_dicts.items():
+            trade = Trade(
+                name=name,
+                symbol=symbol,
+                data=trade_data,
+                instance_id=self.instance_id
+            )
+            session.add(trade)
 
-    def delete_file(self):
-        """ 저장된 파일 삭제 """
-        if os.path.exists(self.filename):
-            os.remove(self.filename)
-            print(f"✅ 파일 {self.filename}가 삭제되었습니다.")
-        else:
-            print(f"❌ 파일 {self.filename}이 존재하지 않습니다.")
-    
-    def get_trades(self):
-        """저장된 거래 내역 반환"""
-        return self.trades
+        session.commit()
+        session.close()
+
+    def get_trades(self, limit=10, name=None, instance_id=None, symbol=None):
+        session = self.Session()
+        instance_id = instance_id or self.instance_id
+
+        query = session.query(Trade).filter_by(instance_id=instance_id)
+        if name:
+            query = query.filter_by(name=name)
+        if symbol:
+            query = query.filter_by(symbol=symbol)
+
+        trades = query.order_by(Trade.timestamp.desc()).limit(limit).all()
+        session.close()
+        return trades
 
     def print_trade_history(self):
-        """ 저장된 거래 내역 출력 """
-        if not self.trades:
+        trades = self.get_trades()
+        if not trades:
             print("이전 거래 기록이 없습니다.")
-            self.save_data = False
-            return self.save_data
-        else:
-            print("거래 기록이 있습니다")
-            self.save_data = True
-            return self.save_data
+            return False
+        print("거래 기록:")
+        for trade in trades:
+            print(f"{trade.timestamp} | {trade.name} | {trade.data} | Instance: {trade.instance_id}")
+        return True
+
+    def delete_all_trades(self):
+        session = self.Session()
+        session.query(Trade).delete()
+        session.commit()
+        session.close()

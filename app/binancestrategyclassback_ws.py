@@ -458,8 +458,8 @@ class Fib_target:
                     self.target_113_2 = 0
                     self.target_1_2 = 0
             # fibRe2의 마지막 되돌림이 있는 상태로 다음 fibRe 피보나치가 이전 피보와 같은 방향으로 생성될 때 되돌림 값 유지
-            if self.list_next_re and self.list_next_re_date:
-                print(self.list_next_re[0],self.list_next_re_date[0],self.second_fib)
+            # if self.list_next_re and self.list_next_re_date:
+            #     print(self.list_next_re[0],self.list_next_re_date[0],self.second_fib)
 
             # 피보 생성이 같은 롱추천으로 지속 될 때 fibRe[11](피보나치 0) 과 fibRe2[4](피보나치1)를 비교해보자
 
@@ -596,8 +596,8 @@ class Fib_target:
                     self.target_1272_2 = 0
                     self.target_113_2 = 0
                     self.target_1_2 = 0
-            if self.list_next_re and self.list_next_re_date:
-                print(self.list_next_re[0],self.list_next_re_date[0],self.second_fib)
+            # if self.list_next_re and self.list_next_re_date:
+            #     print(self.list_next_re[0],self.list_next_re_date[0],self.second_fib)
 
             if not self.list_1618_2 and self.fibRe2:
                 self.list_213_2.append(self.fibRe2[14])

@@ -53,19 +53,13 @@ log_file_path = os.path.join(current_dir, "error.log")
 logging.basicConfig(filename=log_file_path, level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.error(f"프로그램 구동 시작")
 
-# API 불러오기
-
-current_dir = os.path.dirname(os.path.abspath(__file__))  # 현재 파일의 절대 경로
-api_file_path = os.path.join(current_dir, "api.txt")  # 파일 경로 결합
 
 # 역방향 매매 작동 on off 스위치
 posi_R = 'on'
 
 # 수량 N분의 1
-num_of_coins = 2
 divide_switch = 'on'
 
-rest_time = False
 today_date = datetime.now().strftime("%y%m%d")
 
 redis_client = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
@@ -98,7 +92,7 @@ class coin_trading:
     instances = {} # 공유 리스트
     exchange_cache = {}
     
-    def __init__(self,user_id,api_key,api_secret,symbol,period,timeframe,fib_level,leverage):
+    def __init__(self,user_id,api_key,api_secret,symbol,period,timeframe,fib_level,leverage,num_of_coins):
         self.user_id = user_id
         self.api_key = api_key
         self.api_secret = api_secret
@@ -125,11 +119,12 @@ class coin_trading:
         self.symbol_len = len(self.symbol)
         self.unit = self.symbol[0:self.symbol_len - 5]
         self.lower_unit = self.unit.lower()
-        self.logger = TradeLogger(filename=f'{today_date}_{self.unit}_log.json')
+        self.logger = TradeLogger("trading.db",self.user_id)
         self.period = period
         self.timeframe = timeframe
         self.fib_level = fib_level
         self.leverage = leverage
+        self.num_of_coins = num_of_coins
         self.modified_symbol = self.symbol.replace('/', '')
         self.period_switch = 'off'
         self.total_pnl = 0
@@ -147,6 +142,7 @@ class coin_trading:
         self.user_bot = user_bots.get(user_id, {}).get('bot')
         self.user_bot_id = user_bots.get(user_id, {}).get('bot_id')
         self.data_check = None
+        self.is_rest = False
         
 
         # 웹소켓 설정
@@ -374,7 +370,7 @@ class coin_trading:
         while self.running:
             portion = 0.12
             if divide_switch == 'on':
-                self.split_amount = round((self.max_amount / num_of_coins) * portion,self.decimal_place_min_qty)
+                self.split_amount = round((self.max_amount / self.num_of_coins) * portion,self.decimal_place_min_qty)
             else:
                 self.split_amount = round(self.max_amount * portion,self.decimal_place_min_qty)
             await asyncio.sleep(0.3)
@@ -386,7 +382,7 @@ class coin_trading:
         while self.running:
             portion = 0.12
             if self.cur_price > 0 and divide_switch == 'on':
-                self.real_amount = (self.leverage * (self.free_usdt / num_of_coins)) / self.cur_price
+                self.real_amount = (self.leverage * (self.free_usdt / self.num_of_coins)) / self.cur_price
                 if self.real_amount <= self.max_amount:
                     self.amount = round(self.real_amount * portion,self.decimal_place_min_qty)
                 elif self.real_amount > self.max_amount:
@@ -437,10 +433,17 @@ class coin_trading:
             for pos in self.positions:
                 if pos["symbol"] == self.modified_symbol and abs(float(pos["positionAmt"])) > 0:
                     print(f"🔥 현재 {self.symbol} 포지션 보유 중!")
-                    self.position = self.logger.get_trades()[0]
-                    self.period = self.position['period']
-                    self.position_2 = self.logger.get_trades()[1]
-                    self.position_R = self.logger.get_trades()[2]
+                    # 이름별로 포지션 불러오기 (최신 1개씩)
+                    self.position_trade   = self.logger.get_trades(limit=1, name="position", symbol=self.symbol, instance_id=self.user_id)
+                    self.position_2_trade = self.logger.get_trades(limit=1, name="position_2", symbol=self.symbol, instance_id=self.user_id)
+                    self.position_R_trade = self.logger.get_trades(limit=1, name="position_R", symbol=self.symbol, instance_id=self.user_id)
+
+                    self.position   = self.position_trade[0].data if self.position_trade else None
+                    self.position_2 = self.position_2_trade[0].data if self.position_2_trade else None
+                    self.position_R = self.position_R_trade[0].data if self.position_R_trade else None
+
+                    if self.position:
+                        self.period = self.position["period"]
                     return pos  # 포지션 데이터 반환
 
             print(f"✅ {self.symbol} 포지션 없음")
@@ -498,7 +501,11 @@ class coin_trading:
             # self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ [check_status] self.last_check_time: {self.last_check_time}')
             self.balance = self.exchange.fetch_balance() # 바이낸스 api
             if self.data_check is not None:
-                self.logger.save_trade_dict(self.position,self.position_2,self.position_R) # 포지션 딕셔너리 저장
+                self.logger.save_trade_dict(symbol=self.symbol,
+                    position=self.position,
+                    position_2=self.position_2,
+                    position_R=self.position_R
+                ) # 포지션 딕셔너리 저장
                 self.position['period'] = self.period # 봉 개수 저장
             await asyncio.sleep(5)
     
@@ -506,10 +513,10 @@ class coin_trading:
     def check_status(self):
         """프로그램 상태 확인"""
         if self.user_id in active_tasks:
-            bot_instance = active_tasks[self.user_id]["bot_instance"]
+            bot_instance = active_tasks.get(self.user_id, {}).get("bot_instance")
             # self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ [check_status] self ID: {id(bot_instance)}')
-            self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ [check_status] bot.last_check_time: {bot_instance.last_check_time}')
-            self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ [check_status] self.last_check_time: {self.last_check_time}')
+            # self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ [check_status] bot.last_check_time: {bot_instance.last_check_time}')
+            # self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ [check_status] self.last_check_time: {self.last_check_time}')
             now = time.time()
             time_diff = now - bot_instance.last_check_time
 
@@ -526,7 +533,7 @@ class coin_trading:
         while self.running:
             self.ensure_lock()
             async with self.lock:
-                if self.websocket.price is not None and self.free_usdt > 0 and rest_time == False:
+                if self.websocket.price is not None and self.free_usdt > 0 and self.is_rest == False and self.data_check is not None:
 
                     # 피보나치 1과 0이 바뀔 때 리셋
                     if self.position_R['fixed_1'] != self.fibRe[4]:
@@ -1020,7 +1027,7 @@ class coin_trading:
         while self.running:
             self.ensure_lock()
             async with self.lock:
-                if self.websocket.price is not None and self.free_usdt > 0 and rest_time == False:
+                if self.websocket.price is not None and self.free_usdt > 0 and self.is_rest == False and self.data_check is not None:
                     if self.position_2['type'] is None and self.position_2['type'] != "cooling" and self.fibRe2:
                         # print(f"{self.unit} 진입 조건 가격 검색중_2")
                         if self.position['type'] != 'long' and \
@@ -1347,7 +1354,7 @@ class coin_trading:
         while self.running:
             self.ensure_lock()
             async with self.lock:
-                if self.websocket.price is not None and rest_time == False:
+                if self.websocket.price is not None and self.is_rest == False:
                     if (self.position['type'] == 'long' or self.position['type'] == 'long_ex') and self.cur_price > 0 and self.position['amount'] > 0:
                         if self.position['TP_1st'] > 0 and self.cur_price >= self.position['TP_1st'] and self.position['TP_level'] == 1:
                             # 시간대 설정 
@@ -1624,7 +1631,7 @@ class coin_trading:
         while self.running:
             self.ensure_lock()
             async with self.lock:
-                if self.websocket.price is not None and rest_time == False:
+                if self.websocket.price is not None and self.is_rest == False:
                     if self.position['type'] == 'long' and self.position['amount'] > 0 and self.position['SL_1st'] > 0 and self.cur_price > 0:
                         if round(self.position['SL_1st'] / 2,self.decimal_place) <= self.cur_price <= self.position['SL_1st']: 
                             self.timestamp = int(datetime.now().timestamp() * 1000)
@@ -1819,7 +1826,7 @@ class coin_trading:
         while self.running:
             self.ensure_lock()
             async with self.lock:
-                if self.websocket.price is not None and rest_time == False:
+                if self.websocket.price is not None and self.is_rest == False:
                     if self.position['type'] != None and self.position['split'] <= 2 and self.position['amount'] > 0 and self.cur_price > 0:
                         if self.position['type'] == 'long':
                             print("롱 분할 매수 대기중")
@@ -2208,7 +2215,10 @@ class coin_trading:
                 if self.reboot_detect == True:
                     self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n프로그램을 재부팅 완료.{self.period}')
                     self.reboot_detect = False
-
+                
+                if self.user_id in active_tasks:
+                    self.is_rest = active_tasks[self.user_id].get("rest_time")
+                
                 # 이전 거래 확인
                 if self.data_check is None:
                     self.check_pos = await self.check_position() # 현재 포지션 보유 유무 확인
@@ -2218,25 +2228,14 @@ class coin_trading:
                     else:
                         self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n보유중인 {self.unit} 포지션이 없습니다.')
                         self.data_check = False
-                if self.free_usdt > 0 and rest_time == False:
-                    # print(f"사용 가능한 잔고 = ${round(self.free_usdt,2)}\
-                    #     \n레버리지 한도 외 최대 진입 가능한 수량 = {self.unlimited_max_amount} {self.unit}\
-                    #     \n레버리지 한도 내 최대 진입 가능한 수량 = {self.max_amount} {self.unit}\
-                    #     \n레버리지 한도 내 적정 진입 가능한 수량 = {self.split_amount} {self.unit}\
-                    #     \n레버리지 한도 내 실제 진입 가능한 수량 = {self.amount} {self.unit}\
-                    #     \n{self.alram_date1}  ${self.highprice}\
-                    #     \n{self.alram_date2}  ${self.lowprice}\
-                    #     \n{self.fibRe,self.recommend}\n{self.fibRe2,self.new_recommend}\
-                    #     \n{self.unit} 1.618 값은 : ${self.target_1618}, ${self.target_1618_2}\
-                    #     \n{self.unit}의 현재가 = ${self.cur_price} 목표 조건 부합 가격 = ${self.targetprice}\
-                    #     \n현재 시간 : {kst_now.strftime('%Y-%m-%d %H:%M:%S')} TP : {self.TP_1st}\
-                    #     \n-----------------------------------------------------------------")
+                if self.free_usdt > 0 and self.is_rest == False:
                     pass
-                elif rest_time == True:
+                elif self.is_rest == True:
                     print('매매 휴식중...')
                 else:
                     print('사용 가능한 잔고가 없습니다.')
                     await asyncio.sleep(5)
+                # print(f"⚠️ 현재 실행 중인 인스턴스 id: {id(self)} {self.symbol}")
                 await self.send_trade_update()
             await asyncio.sleep(0.3)
             
@@ -2248,7 +2247,8 @@ class coin_trading:
             \n0.382({self.fibRe[9]})\n0.236({self.fibRe[10]})\n0({self.fibRe[11]})\n{self.recommend}\
             되돌림 포인트 : {self.fib_level_name}\
             \n[포지션] : {self.position}\n[역포지션] : {self.position_R}\
-            \n[포지션2] : {self.position_2}\n[fibRe2] : {self.fibRe2}\n {self.period} {self.timeframe}\n청산가격 : {self.liquidation_price}, {self.liquidation_price_2}_2, {self.liquidation_price_R}_R")
+            \n[포지션2] : {self.position_2}\n[fibRe2] : {self.fibRe2}\n {self.period} {self.timeframe}\n청산가격 : {self.liquidation_price}, {self.liquidation_price_2}_2, {self.liquidation_price_R}_R\
+            \n📥 /btc 핸들러에서 참조한 인스턴스 id: {id(self)}")
     
     def onoff(self, update, context):
         """텔레그램 상태 확인 명령"""
@@ -2310,17 +2310,15 @@ class coin_trading:
             text=f"✅ 알림\n올바른 숫자를 입력해주세요. 예: /coin_ 10.")
 
     def rest_time(self,update,context):
-        global rest_time
         context.bot.send_message(chat_id=update.effective_chat.id,\
         text=f"✅ 알림\n매매 휴식이 시작되었습니다")
-        rest_time = True
+        active_tasks[self.user_id]["rest_time"] = True
     
     def work_time(self,update,context):
-        global rest_time
-        if rest_time == True:
+        if self.is_rest == True:
             context.bot.send_message(chat_id=update.effective_chat.id,\
             text=f"✅ 알림\n매매 휴식이 종료되었습니다")
-            rest_time = False
+            active_tasks[self.user_id]["rest_time"] = False
         else:
             context.bot.send_message(chat_id=update.effective_chat.id,\
             text=f"✅ 알림\n매매 휴식중이 아닙니다.")
@@ -2330,32 +2328,46 @@ class coin_trading:
         text=f"✅ 알림\n/onoff : 프로그램 작동 여부\n/coin : 코인 거래 세부 정보\n/coin_ number : period 개수 변경\n/coinx number : 레버리지 변경\n/exit : 프로그램 종료\n/reboot : 프로그램 재부팅\n/rest : 프로그램 휴식\n/work : 프로그램 휴식 종료")
 
     def handler(self):
-        self.condition_handler = CommandHandler(f'{self.unit.lower()}', self.condition)
-        dispatcher.add_handler(self.condition_handler)
+        """
+        텔레그램 핸들러 등록
+        항상 active_tasks[user_id]["bot_instance"]를 참조하도록 래핑된 핸들러 등록
+        중복 방지를 위해 기존 핸들러 제거 후 재등록
+        """
+        dispatcher = user_bots.get(self.user_id, {}).get("dispatcher")
+        def create_wrapped_handler(method_name):
+            # 최신 인스턴스를 active_tasks에서 가져와 실행
+            def handler_func(update, context):
+                bot_instance = active_tasks.get(self.user_id, {}).get("bot_instance")
+                if bot_instance:
+                    method = getattr(bot_instance, method_name, None)
+                    if method:
+                        method(update, context)
+                    else:
+                        context.bot.send_message(chat_id=update.effective_chat.id,
+                                                text=f"⚠️ '{method_name}' 핸들러를 찾을 수 없습니다.")
+            return handler_func
 
-        self.onoff_handler = CommandHandler('onoff', self.onoff)
-        dispatcher.add_handler(self.onoff_handler)
+        # 커맨드와 함수 이름 매핑
+        command_map = {
+            f"{self.unit.lower()}": "condition",
+            "onoff": "onoff",
+            "exit": "exit",
+            "reboot": "reboot",
+            f"{self.unit.lower()}_": "change_period",
+            f"{self.unit.lower()}x": "change_leverage",
+            "rest": "rest_time",
+            "work": "work_time",
+            "help": "help",
+        }
 
-        self.exit_handler = CommandHandler('exit', self.exit)
-        dispatcher.add_handler(self.exit_handler)
-
-        self.reboot_handler = CommandHandler('reboot', self.reboot)
-        dispatcher.add_handler(self.reboot_handler)
-
-        self.change_period_handler = CommandHandler(f'{self.unit.lower()}_', self.change_period)
-        dispatcher.add_handler(self.change_period_handler)
-
-        self.change_leverage_handler = CommandHandler(f'{self.unit.lower()}x', self.change_leverage)
-        dispatcher.add_handler(self.change_leverage_handler)
-
-        self.rest_time_handler = CommandHandler('rest', self.rest_time)
-        dispatcher.add_handler(self.rest_time_handler)
-
-        self.work_time_handler = CommandHandler('work', self.work_time)
-        dispatcher.add_handler(self.work_time_handler)
-
-        self.help_handler = CommandHandler('help', self.help)
-        dispatcher.add_handler(self.help_handler)
+        # 이미 등록된 핸들러 제거 및 새로 등록
+        for command, method_name in command_map.items():
+            handler = CommandHandler(command, create_wrapped_handler(method_name))
+            try:
+                dispatcher.remove_handler(handler)
+            except:
+                pass  # 제거 실패는 무시
+            dispatcher.add_handler(handler)
 
 
     async def run(self, user_id: str, symbol_request: Dict):
@@ -2433,21 +2445,27 @@ def format_symbol(symbol):
 
 def start_telegram(user_id: str, telegram_token: str, telegram_bot_id: str):
     """사용자별로 새로운 Updater 객체를 만들고 시작하는 함수"""
-    global updater, dispatcher
     
     bot = telegram.Bot(
         token=telegram_token,
         request=telegram.utils.request.Request(
             connect_timeout=10,  # 연결 대기 시간
-            read_timeout=20      # 읽기 대기 시간
+            read_timeout=20,      # 읽기 대기 시간
+            con_pool_size=30
         )
     )
-    user_bots[user_id] = {'bot': bot, 'bot_id': telegram_bot_id}
+
+    updater = Updater(bot=bot, use_context=True)
+    dispatcher = updater.dispatcher
+
+    user_bots[user_id] = {
+        'bot': bot,
+        'bot_id': telegram_bot_id,
+        'updater': updater,
+        'dispatcher': dispatcher  # ✅ 저장
+    }
     user_bot_data = {'bot_id': telegram_bot_id, 'telegram_token': telegram_token}  # 사용자별 봇 정보를 저장
     redis_client.set(f"user_bot:{user_id}", json.dumps(user_bot_data))
-    
-    updater = Updater(token=telegram_token, use_context=True)
-    dispatcher = updater.dispatcher
 
     updater.start_polling()  # 텔레그램 봇 폴링 시작
 
@@ -2484,6 +2502,7 @@ def start_trading_task(self, user_id: str, symbols: List[SymbolItem], telegram_t
     threading.Thread(target=loop.run_forever, daemon=True).start()
 
     trading_tasks = []
+    num_of_coins = len(symbols)
     for symbol in symbols:
         formatted_symbol = format_symbol(symbol["symbol"])
         bar_count = int(symbol.get("barCount", 500))
@@ -2491,7 +2510,7 @@ def start_trading_task(self, user_id: str, symbols: List[SymbolItem], telegram_t
         leverage = int(symbol.get("leverage", 20))
         
         coin_trader = coin_trading(user_id, binance_key, binance_secret,
-                                formatted_symbol, bar_count, timeframe, 7, leverage)
+                                formatted_symbol, bar_count, timeframe, 7, leverage, num_of_coins)
         coin_trader.handler()
         task = asyncio.run_coroutine_threadsafe(coin_trader.run(user_id, {"symbol": symbol}), loop)
         trading_tasks.append(task)
@@ -2500,19 +2519,15 @@ def start_trading_task(self, user_id: str, symbols: List[SymbolItem], telegram_t
     user_bot.sendMessage(chat_id=user_bot_id, text= f'✅ 알림\n[{user_id}]의 자동매매 프로그램이 시작되었습니다.\
     \n시작 잔고 : {round(coin_trader.total_usdt,2)}$')
 
-    # # asyncio 작업 생성
-    # first_task = asyncio.run_coroutine_threadsafe(first_coin.run(user_id, symbol_request), loop)
-    # second_task = asyncio.run_coroutine_threadsafe(second_coin.run(user_id, symbol_request), loop)
-
     # Celery 작업과 asyncio Task 저장
-    print(active_tasks)
     active_tasks.setdefault(user_id, {}).update({
-    "bot_instance": coin_trader,
-    "celery_task": self.request.id,
-    "asyncio_tasks": trading_tasks,
-    "loop": loop,
-    "realizedPnl": 0
-    })
+        "bot_instance": coin_trader,
+        "celery_task": self.request.id,
+        "asyncio_tasks": trading_tasks,
+        "loop": loop,
+        "realizedPnl": 0,
+        "rest_time": False
+        })
 
     return {"status": "completed", "user_id": user_id, "symbols": symbols}
     
@@ -2562,7 +2577,11 @@ def stop_trading_task(self, user_id: str):
         print(f"⚠️ [{user_id}] asyncio 루프 중지 완료")
 
     # 🔥 3. active_tasks에서 제거
-    del active_tasks[user_id]
+    if user_id in active_tasks:
+        bot_instance = active_tasks[user_id].get("bot_instance")
+        if bot_instance:
+            del bot_instance  # 메모리에서 삭제 요청
+        del active_tasks[user_id]
 
     print(f"✅ [{user_id}] 자동매매 작업이 종료되었습니다.")
     return {"status": "completed", "message": "자동매매 작업 종료됨"}

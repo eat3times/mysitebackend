@@ -17,6 +17,7 @@ Start-Process powershell -Verb runAs
 cd C:\autotrade\webui\backend
 Set-ExecutionPolicy Unrestricted -Scope Process
 venv\Scripts\activate
+deactivate
 uvicorn main:app --reload
 uvicorn app.main:app --reload
 gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app
@@ -28,7 +29,7 @@ redis-cli ping
 
 git status
 git add .
-git commit -m 
+git commit -m
 git pull origin main
 git push origin main
 
@@ -39,6 +40,9 @@ source venv/bin/activate
 tmux new -s fastapi
 tmux attach
 gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 4
+gunicorn app.main:app \
+    -k uvicorn.workers.UvicornWorker \
+    --log-level info
 
 cd /c/autotrade/webui
 chmod 600 ec2backend.pem
@@ -47,3 +51,4 @@ cd mysitebackend
 git pull origin main
 
 REACT_APP_API_URL=https://54.206.216.17:8000
+
