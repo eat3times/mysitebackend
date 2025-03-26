@@ -1,3 +1,6 @@
 venv/
 __pycache__/
 api.txt
+app/error.log
+test.db
+trading.db

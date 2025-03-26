@@ -39,16 +39,36 @@ source venv/bin/activate
 
 tmux new -s fastapi
 tmux attach
+tmux attach -t fastapi
+tmux attach -t celery
+tmux ls
+tmux kill-session -t fastapi
+tmux new -s fastapi
+
+pkill -f 'celery'
+
 gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 4
 gunicorn app.main:app \
     -k uvicorn.workers.UvicornWorker \
     --log-level info
+gunicorn app.main:app \
+  -k uvicorn.workers.UvicornWorker \
+  --bind 0.0.0.0:8000 \
+  --workers 4 \
+  --forwarded-allow-ips="*"
 
 cd /c/autotrade/webui
 chmod 600 ec2backend.pem
 ssh -i ec2backend.pem ubuntu@54.206.216.17
 cd mysitebackend
+source venv/bin/activate
 git pull origin main
 
 REACT_APP_API_URL=https://54.206.216.17:8000
+sudo nano /etc/nginx/sites-available/fastapi.conf
+sudo nginx -t
+sudo systemctl restart nginx
 
+sudo systemctl status redis
+sudo systemctl start redis
+sudo lsof -i :6379
