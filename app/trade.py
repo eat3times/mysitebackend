@@ -2554,7 +2554,7 @@ def stop_trading_task(self, user_id: str):
 
     # 🔥 1. Celery 작업 중지 (강제 종료)
     if celery_task_id:
-        celery_task = AsyncResult(celery_task_id)
+        celery_task = AsyncResult(celery_task_id, app=celery_app)
         if celery_task.state in ["PENDING", "STARTED", "RETRY"]:
             celery_task.revoke(terminate=True, signal="SIGTERM")
             print(f"⚠️ [{user_id}] Celery 작업 강제 종료")
