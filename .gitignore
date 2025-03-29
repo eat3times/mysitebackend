@@ -1,6 +1,25 @@
+# 가상환경
 venv/
+
+# Python 캐시
 __pycache__/
-api.txt
+*.py[cod]
+
+# 로그 및 에러 파일
+*.log
 app/error.log
-test.db
-trading.db
+
+# 데이터베이스
+*.db
+
+# 환경설정 파일
+*.env
+.env.local
+.env.*
+
+# 텍스트 파일 (API 키 등 민감정보)
+api.txt
+
+# IDE 설정
+.vscode/
+.idea/
