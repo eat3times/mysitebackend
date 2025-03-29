@@ -58,13 +58,13 @@ gunicorn app.main:app \
   --forwarded-allow-ips="*"
 
 cd /c/autotrade/webui
-chmod 600 ec2backend.pem
-ssh -i ec2backend.pem ubuntu@54.206.216.17
+chmod 600 tradingbackend_seoul.pem
+ssh -i tradingbackend_seoul.pem ubuntu@13.125.249.212
 cd mysitebackend
 source venv/bin/activate
 git pull origin main
 
-REACT_APP_API_URL=https://54.206.216.17:8000
+13.125.249.212
 sudo nano /etc/nginx/sites-available/fastapi.conf
 sudo nginx -t
 sudo systemctl restart nginx

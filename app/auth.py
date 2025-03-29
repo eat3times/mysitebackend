@@ -7,6 +7,7 @@ from app import models, schemas, crud
 from sqlalchemy.orm import Session
 from app import auth as auth_utils
 from datetime import timedelta
+from typing import Optional
 
 # 비밀 키와 알고리즘 설정
 SECRET_KEY = "d5bfc82432fa226ed0e17883f25d6d4c5a8fdad9b5d15eb07938ef16b1a3b167"  # 실제 서비스에서는 더 안전한 키로 설정하세요!
@@ -22,7 +23,7 @@ def login_user(user: schemas.UserLogin, db: Session):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     
     # JWT 토큰 생성
-    access_token = auth_utils.create_access_token(data={"sub": db_user.username}, expires_delta=timedelta(minutes=60))
+    access_token = auth_utils.create_access_token(data={"sub": db_user.username, "id": db_user.id}, expires_delta=timedelta(minutes=60))
     return {"access_token": access_token, "token_type": "bearer"}
 
 # 회원가입 처리
@@ -45,9 +46,9 @@ def register_user(user: schemas.UserCreate, db: Session):
     return new_user
 
 # JWT 토큰 생성 함수
-def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes=15)):
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + expires_delta
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=30))
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt

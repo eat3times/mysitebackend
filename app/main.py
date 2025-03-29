@@ -11,6 +11,7 @@ import json
 from app.global_state import active_tasks
 import asyncio
 import aioredis
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -58,9 +59,10 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
         username: str = payload.get("sub")
-        if username is None:
+        user_id = payload.get("id")
+        if username is None or user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
-        return username
+        return {"username": username, "id": user_id}
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
 
@@ -87,3 +89,105 @@ def login(user: schemas.UserLogin, db: Session = Depends(get_db)):
 @app.get("/")
 def read_root():
     return {"message": "Welcome to My site"}
+
+@app.get("/users/{user_id}", response_model=schemas.UserInfo)
+def get_user_profile(user_id: str, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    current_user = get_current_user(token)
+    if current_user['username'] != user_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    
+    user = db.query(models.User).filter(models.User.username == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+    return {
+        "email": user.email,
+        "telegram_token": user.telegram_token,
+        "telegram_bot_id": user.telegram_bot_id
+    }
+
+@app.put("/users/{user_id}/telegram")
+def update_telegram_settings(
+    user_id: str,
+    data: dict,
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme),
+):
+    current_user = get_current_user(token)
+    if current_user['username'] != user_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    
+    user = db.query(models.User).filter(models.User.username == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+    user.telegram_token = data.get("telegram_token")
+    user.telegram_bot_id = data.get("telegram_bot_id")
+    db.commit()
+    return {"message": "텔레그램 설정이 저장되었습니다."}
+
+@app.get("/users/{user_id}/apikeys")
+def get_user_apikeys(user_id: str, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    current_user = get_current_user(token)
+    if current_user['username'] != user_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    keys = crud.get_api_keys(db, user_id)
+    if not keys:
+        raise HTTPException(status_code=404, detail="API 키를 찾을 수 없습니다.")
+    return keys
+
+@app.put("/users/{user_id}/apikeys")
+def update_user_apikeys(
+    user_id: str,
+    data: schemas.APIKeyUpdate,
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme),
+):
+    current_user = get_current_user(token)
+    if current_user['username'] != user_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    success = crud.update_api_keys(db, user_id, data.access_key, data.secret_key)
+    if not success:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    return {"message": "API 키가 성공적으로 수정되었습니다."}
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+@app.put("/users/{user_id}/password")
+def change_password(
+    user_id: str,
+    passwords: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+):
+    current_user = get_current_user(token)
+    if current_user['username'] != user_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+
+    user = db.query(models.User).filter(models.User.username == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+    if not auth.verify_password(passwords.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="현재 비밀번호가 올바르지 않습니다.")
+
+    user.hashed_password = auth.hash_password(passwords.new_password)
+    db.commit()
+    return {"message": "비밀번호가 변경되었습니다."}
+
+# 거래내역 부분
+@app.post("/users/{user_id}/trades", response_model=schemas.TradeRecordOut)
+def save_trade_record(user_id: int, trade: schemas.TradeRecordCreate, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    current_user = get_current_user(token)
+    if current_user['id'] != user_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    return crud.create_trade_record(db, trade)
+
+@app.get("/users/{user_id}/trades", response_model=list[schemas.TradeRecordOut])
+def get_user_trades(user_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    current_user = get_current_user(token)
+    if current_user['id'] != user_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    return crud.get_trade_records(db, user_id)
