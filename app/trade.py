@@ -29,7 +29,7 @@ from app.database import get_db, SessionLocal
 from fastapi.middleware.cors import CORSMiddleware
 from app.crud import get_user_by_id, create_trade_for_user
 from pydantic import BaseModel
-from celery_config_window import celery_app
+from celery_config import celery_app
 from celery.result import AsyncResult
 from celery.exceptions import Ignore
 from typing import Dict, List
