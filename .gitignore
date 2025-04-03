@@ -7,7 +7,7 @@ __pycache__/
 
 # 로그 및 에러 파일
 *.log
-app/error.log
+/app/error.log
 
 # 데이터베이스
 *.db
@@ -18,8 +18,14 @@ app/error.log
 .env.*
 
 # 텍스트 파일 (API 키 등 민감정보)
-api.txt
+/app/api.txt
+/app/token.txt
 
 # IDE 설정
 .vscode/
 .idea/
+
+alembic/
+alembic.ini
+
+celery_config_window.py

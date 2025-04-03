@@ -23,13 +23,13 @@ import threading
 
 from celery import Celery
 from fastapi import APIRouter, Depends
-from app import trade, models
+from app import  models, crud, schemas
 from sqlalchemy.orm import Session
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from fastapi.middleware.cors import CORSMiddleware
 from app.crud import get_user_by_id, create_trade_for_user
 from pydantic import BaseModel
-from celery_config import celery_app
+from celery_config_window import celery_app
 from celery.result import AsyncResult
 from celery.exceptions import Ignore
 from typing import Dict, List
@@ -527,6 +527,46 @@ class coin_trading:
                 self.is_running = True
                 return self.is_running
     
+    ### 거래내역 생성
+    def handle_order_filled(self, order_data):
+        db = SessionLocal()
+        try:
+            user = db.query(models.User).filter(models.User.username == self.user_id).first()
+            if not user:
+                raise ValueError(f"❌ 사용자 '{self.user_id}'를 찾을 수 없습니다.")
+            record = schemas.TradeRecordCreate(
+                user_id=user.id,
+                symbol=self.modified_symbol,
+                side=order_data['type'],
+                entry_price=order_data["avgPrice"],
+                quantity=order_data["amount"],
+                leverage=self.leverage,
+                order_id='1'
+            )
+            saved = crud.save_trade_record(db, record)
+            db.commit()
+            return saved
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            db.close()
+    # pnl 저장       
+    def db_pnl_filled(self):
+        db = SessionLocal()
+        try:
+            user = db.query(models.User).filter(models.User.username == self.user_id).first()
+            if not user:
+                raise ValueError(f"❌ 사용자 '{self.user_id}'를 찾을 수 없습니다.")
+            user.total_pnl += self.total_pnl
+            db.commit()
+            return user.total_pnl
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            db.close()
+    
     # 포지션 진입
     @wrap_task()
     async def enter_position(self):
@@ -618,6 +658,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 롱 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position)
                             
                         if self.Sub_target >= self.cur_price >= self.short_target and self.recommend == "숏 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
@@ -639,6 +680,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 숏 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position)
 
 
                     ### Reverse target
@@ -668,6 +710,7 @@ class coin_trading:
                                 self.total_fees = round(self.total_fees + self.fees,4)
                                 self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 역 숏 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                                 self.balance = self.exchange.fetch_balance()
+                                self.handle_order_filled(self.position_R)
                             elif self.target_over >= self.cur_price >= self.target_cal and self.recommend == "숏 추천": # 위로 통과
                                 self.last_entry_time = time.time()
                                 self.position_R['type'] = 'long'
@@ -690,6 +733,7 @@ class coin_trading:
                                 self.total_fees = round(self.total_fees + self.fees,4)
                                 self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 역 롱 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                                 self.balance = self.exchange.fetch_balance()
+                                self.handle_order_filled(self.position_R)
 
                     # Extension
                     if self.position['type'] is None and self.cur_price > 0:
@@ -714,6 +758,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.272 롱 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position)
                         if self.target_1414 >= self.cur_price >= self.target_1272 and self.recommend == "롱 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
                             await asyncio.sleep(0.3)
@@ -734,6 +779,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.272 숏 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position)
                     if (self.position['type'] == 'long_ex' or self.position['type'] == 'short_ex') and self.cur_price > 0:
                         # 1.414
                         if self.position['type_ext'] == '1.272' and self.target_1618 <= self.cur_price <= self.target_1414 and self.recommend == "숏 추천":
@@ -756,6 +802,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.414 롱 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position)
                         if self.position['type_ext'] == '1.272' and self.target_1618 >= self.cur_price >= self.target_1414 and self.recommend == "롱 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
                             await asyncio.sleep(0.3)
@@ -776,6 +823,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.414 숏 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position)
                         # 1.618
                         if self.position['type_ext'] == '1.414' and self.target_2 <= self.cur_price <= self.target_1618 and self.recommend == "숏 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
@@ -797,6 +845,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.618 롱 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position)
                         if self.position['type_ext'] == '1.414' and self.target_2 >= self.cur_price >= self.target_1618 and self.recommend == "롱 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
                             await asyncio.sleep(0.3)
@@ -817,6 +866,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.618 숏 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position)
                         # 2
                         if self.position['type_ext'] == '1.618' and self.target_213 < self.cur_price < self.target_2 and self.recommend == "숏 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
@@ -838,6 +888,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 2 롱 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position)
                         if self.position['type_ext'] == '1.618' and self.target_213 > self.cur_price > self.target_2 and self.recommend == "롱 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
                             await asyncio.sleep(0.3)
@@ -858,6 +909,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 2 숏 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position)
                     if self.position['type'] == 'long':
                         print(f"✅ 알림 이미 롱 포지션 보유 중입니다. 익절가격 : {self.position['TP_1st']}")
                         self.positions = self.balance['info']['positions']
@@ -1051,6 +1103,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 롱 포지션 진입 완료 !!!_2\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position_2)
                         if self.position['type'] != 'short' and \
                             self.Sub_target_2 >= self.cur_price >= self.short_target_2 and self.new_recommend == "숏 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
@@ -1072,6 +1125,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 숏 포지션 진입 완료 !!!_2\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position_2)
 
                         
                     # Extension
@@ -1097,6 +1151,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)                        
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.272 롱 포지션 진입 완료 !!!_2\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position_2)
                         if self.target_1414_2 >= self.cur_price >= self.target_1272_2 and self.recommend == "롱 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
                             await asyncio.sleep(0.3)
@@ -1117,6 +1172,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.272 숏 포지션 진입 완료 !!!_2\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position_2)
                     if (self.position_2['type'] == 'long_ex' or self.position_2['type'] == 'short_ex') and self.cur_price > 0:    
                         # 1.414
                         if self.position_2['type_ext'] == '1.272' and self.target_1618_2 <= self.cur_price <= self.target_1414_2 and self.recommend == "숏 추천":
@@ -1139,6 +1195,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.414 롱 포지션 진입 완료 !!!_2\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position_2)
                         if self.position_2['type_ext'] == '1.272' and self.target_1618_2 >= self.cur_price >= self.target_1414_2 and self.recommend == "롱 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
                             await asyncio.sleep(0.3)
@@ -1159,6 +1216,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.414 숏 포지션 진입 완료 !!!_2\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position_2)
                         # 1.618
                         if self.position_2['type_ext'] == '1.414' and self.target_2_2 <= self.cur_price <= self.target_1618_2 and self.recommend == "숏 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
@@ -1180,6 +1238,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.618 롱 포지션 진입 완료 !!!_2\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position_2)
                         if self.position_2['type_ext'] == '1.414' and self.target_2_2 >= self.cur_price >= self.target_1618_2 and self.recommend == "롱 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
                             await asyncio.sleep(0.3)
@@ -1200,6 +1259,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 1.618 숏 포지션 진입 완료 !!!_2\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position_2)
                         # 2
                         if self.position_2['type_ext'] == '1.618' and self.target_213_2 < self.cur_price < self.target_2_2 and self.recommend == "숏 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
@@ -1221,6 +1281,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 2 롱 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position_2)
                         if self.position_2['type_ext'] == '1.618' and self.target_213_2 > self.cur_price > self.target_2_2 and self.recommend == "롱 추천":
                             self.timestamp = int(datetime.now().timestamp() * 1000)
                             await asyncio.sleep(0.3)
@@ -1241,6 +1302,7 @@ class coin_trading:
                             self.total_fees = round(self.total_fees + self.fees,4)
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.unit} 2 숏 포지션 진입 완료 !!!\n수수료 : {self.fees}$')
                             self.balance = self.exchange.fetch_balance()
+                            self.handle_order_filled(self.position_2)
                     if self.position_2['type'] == 'long' and self.fibRe2:
                         print(f"✅ 알림 이미 롱 포지션 보유 중입니다_2. 익절가격 : {self.position_2['TP_1st']}")
                         self.positions = self.balance['info']['positions']
@@ -1977,6 +2039,7 @@ class coin_trading:
                             self.exchange.transfer('USDT', self.transfer_usdt,'future','spot')
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.transfer_usdt}$ 전송완료 !!!\
                             \n실현손익 : {self.total_pnl}$\n차감된 수수료 : {self.total_fees}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$')
+                            self.db_pnl_filled()
                             self.total_pnl = 0 
                             self.transfer_usdt = 0
                             self.total_fees = 0
@@ -2010,6 +2073,7 @@ class coin_trading:
                             self.exchange.transfer('USDT', self.transfer_usdt,'future','spot')
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.transfer_usdt}$ 전송완료 !!!\
                             \n실현손익 : {self.total_pnl}$\n차감된 수수료 : {self.total_fees}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$')
+                            self.db_pnl_filled()
                             self.total_pnl = 0 
                             self.transfer_usdt = 0
                             self.total_fees = 0
@@ -2043,6 +2107,7 @@ class coin_trading:
                             self.exchange.transfer('USDT', self.transfer_usdt,'future','spot')
                             self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n{self.transfer_usdt}$ 전송완료 !!!\
                             \n실현손익 : {self.total_pnl}$\n차감된 수수료 : {self.total_fees}$\n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$')
+                            self.db_pnl_filled()
                             self.total_pnl = 0 
                             self.transfer_usdt = 0
                             self.total_fees = 0
@@ -2074,6 +2139,7 @@ class coin_trading:
                         active_tasks[self.user_id]["realizedPnl"] = round(active_tasks[self.user_id]["realizedPnl"] + self.total_pnl,4)
                         self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n손절금액 : {self.total_pnl}$ ㅠㅠ\
                         \n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\n차감된 총 수수료 : {self.total_fees}$')
+                        self.db_pnl_filled()
                         self.total_pnl = 0
                         self.total_fees = 0
                         self.position['stoploss'] = None
@@ -2107,6 +2173,7 @@ class coin_trading:
                         active_tasks[self.user_id]["realizedPnl"] = round(active_tasks[self.user_id]["realizedPnl"] + self.total_pnl,4)
                         self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n손절금액 : {self.total_pnl}$ ㅠㅠ\
                         \n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\n차감된 총 수수료 : {self.total_fees}$')
+                        self.db_pnl_filled()
                         self.total_pnl = 0
                         self.total_fees = 0
                         self.position_2['stoploss'] = None
@@ -2140,6 +2207,7 @@ class coin_trading:
                         active_tasks[self.user_id]["realizedPnl"] = round(active_tasks[self.user_id]["realizedPnl"] + self.total_pnl,4)
                         self.user_bot.sendMessage(chat_id=self.user_bot_id, text= f'✅ 알림\n손절금액 : {self.total_pnl}$ ㅠㅠ\
                         \n오늘 총 실현손익 : {active_tasks[self.user_id]["realizedPnl"]}$\n차감된 총 수수료 : {self.total_fees}$')
+                        self.db_pnl_filled()
                         self.total_pnl = 0
                         self.total_fees = 0
                         self.position_R['stoploss'] = None
@@ -2425,18 +2493,18 @@ async def get_task_status(task_id: str):
     return {"status": task.state}
 
 
-@router.get("/futures_position/{user_id}")
-async def get_position(user_id: str):
-    first_coin = coin_trading(user_id,'ETH/USDT',500,'4h',7,20)
-    second_coin = coin_trading(user_id,'BTC/USDT',500,'4h',7,20)
-    position1 = await first_coin.check_position()  # 비동기 함수 호출
-    position2 = await second_coin.check_position()  # 비동기 함수 호출
-    return {
-        "positions": {
-            "ETH/USDT": position1 if position1 else "Position not found",
-            "BTC/USDT": position2 if position1 else "Position not found"
-        }
-    }
+# @router.get("/futures_position/{user_id}")
+# async def get_position(user_id: str):
+#     first_coin = coin_trading(user_id,'ETH/USDT',500,'4h',7,20)
+#     second_coin = coin_trading(user_id,'BTC/USDT',500,'4h',7,20)
+#     position1 = await first_coin.check_position()  # 비동기 함수 호출
+#     position2 = await second_coin.check_position()  # 비동기 함수 호출
+#     return {
+#         "positions": {
+#             "ETH/USDT": position1 if position1 else "Position not found",
+#             "BTC/USDT": position2 if position1 else "Position not found"
+#         }
+#     }
 
 # 심볼 변환 함수
 def format_symbol(symbol):
@@ -2474,7 +2542,6 @@ def start_trading_task(self, user_id: str, symbols: List[SymbolItem], telegram_t
     """
     Celery 작업으로 개별 사용자의 자동매매 실행
     """
-
     if user_id not in user_bots:
         print(f"❌ [ERROR] user_id {user_id}의 텔레그램 봇 정보가 없습니다.")
         start_telegram(user_id, telegram_token, telegram_bot_id)
@@ -2688,6 +2755,6 @@ async def get_trade_output(user_id: str, symbol: str = None):
         return {"trade_output": json.loads(output)}
     else:
         return {"trade_output": None}
-
+    
 if __name__ == "__main__":
     print("📢 Trade 모듈 실행됨!") 

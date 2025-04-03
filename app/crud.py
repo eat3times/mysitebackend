@@ -33,12 +33,12 @@ def update_api_keys(db: Session, user_id: str, access_key: str, secret_key: str)
     return False
 
 # 거래내역 부분
-def create_trade_record(db: Session, trade: schemas.TradeRecordCreate):
+def get_trade_records(db: Session, user_id: int):
+    return db.query(models.TradeRecord).filter(models.TradeRecord.user_id == user_id).order_by(models.TradeRecord.created_at.desc()).all()
+
+def save_trade_record(db: Session, trade: schemas.TradeRecordCreate):
     db_trade = models.TradeRecord(**trade.dict())
     db.add(db_trade)
     db.commit()
     db.refresh(db_trade)
     return db_trade
-
-def get_trade_records(db: Session, user_id: str):
-    return db.query(models.TradeRecord).filter(models.TradeRecord.user_id == user_id).order_by(models.TradeRecord.timestamp.desc()).all()

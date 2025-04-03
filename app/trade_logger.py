@@ -25,17 +25,36 @@ class TradeLogger:
     def save_trade_dict(self, symbol, **trade_dicts):
         session = self.Session()
 
-        for name, trade_data in trade_dicts.items():
-            trade = Trade(
-                name=name,
-                symbol=symbol,
-                data=trade_data,
-                instance_id=self.instance_id
-            )
-            session.add(trade)
+        try:
+            for name, trade_data in trade_dicts.items():
+                existing_trade = session.query(Trade).filter_by(
+                    name=name,
+                    symbol=symbol,
+                    instance_id=self.instance_id
+                ).first()
 
-        session.commit()
-        session.close()
+                if existing_trade:
+                    # 기존 거래가 있으면 덮어쓰기
+                    existing_trade.data = trade_data
+                    existing_trade.timestamp = datetime.utcnow()  # 시간도 갱신
+                else:
+                    # 없으면 새로 생성
+                    new_trade = Trade(
+                        name=name,
+                        symbol=symbol,
+                        data=trade_data,
+                        instance_id=self.instance_id
+                    )
+                    session.add(new_trade)
+
+            session.commit()
+
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
 
     def get_trades(self, limit=10, name=None, instance_id=None, symbol=None):
         session = self.Session()

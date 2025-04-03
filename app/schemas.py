@@ -38,16 +38,23 @@ class UserInfo(BaseModel):
 class TradeRecordCreate(BaseModel):
     user_id: int
     symbol: str
+    side: str
     entry_price: float
-    exit_price: float
     quantity: float
-    pnl: float
     leverage: int
+    order_id: Optional[str] = None
 
 class TradeRecordOut(TradeRecordCreate):
     id: int
-    timestamp: datetime
+    exit_price: Optional[float] = None 
+    pnl: float
+    created_at: datetime
+    closed_at: Optional[datetime] = None
 
     model_config = {
         "from_attributes": True
     }
+
+class CloseTradeRequest(BaseModel):
+    exit_price: float
+    pnl: float

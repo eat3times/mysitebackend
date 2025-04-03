@@ -14,16 +14,21 @@ class User(Base):
     telegram_bot_id = Column(String, nullable=True)  # 텔레그램 챗 ID
     binance_key = Column(String, nullable=True)  # 텔레그램 봇 토큰
     binance_secret = Column(String, nullable=True)  # 텔레그램 챗 ID
+    total_usdt = Column(Float, default=0.0)
+    total_pnl = Column(Float, default=0.0)
 
 class TradeRecord(Base):
     __tablename__ = "trade_records"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))  # 👈 숫자형 ID로 연결
+    user_id = Column(Integer, ForeignKey("users.id"))
     symbol = Column(String)
+    side = Column(String)  # "LONG"/"BUY" or "SHORT"/"SELL"
     entry_price = Column(Float)
-    exit_price = Column(Float)
+    exit_price = Column(Float, nullable=True)
     quantity = Column(Float)
-    pnl = Column(Float)
     leverage = Column(Integer)
-    timestamp = Column(DateTime, default=func.now())
+    pnl = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=func.now())  # 주문 체결 시점
+    closed_at = Column(DateTime, nullable=True)        # 청산 시점
+    order_id = Column(String, nullable=True) 

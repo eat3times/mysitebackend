@@ -6,12 +6,14 @@ from jose import JWTError, jwt
 from app import models, schemas, auth, database, crud, trade
 from app.database import get_db
 from app.trade import router as trade_router
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 import json
 from app.global_state import active_tasks
 import asyncio
 import aioredis
 from pydantic import BaseModel
+import ccxt
 
 app = FastAPI()
 
@@ -178,16 +180,66 @@ def change_password(
     return {"message": "비밀번호가 변경되었습니다."}
 
 # 거래내역 부분
-@app.post("/users/{user_id}/trades", response_model=schemas.TradeRecordOut)
-def save_trade_record(user_id: int, trade: schemas.TradeRecordCreate, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
-    current_user = get_current_user(token)
-    if current_user['id'] != user_id:
-        raise HTTPException(status_code=403, detail="권한이 없습니다.")
-    return crud.create_trade_record(db, trade)
-
 @app.get("/users/{user_id}/trades", response_model=list[schemas.TradeRecordOut])
-def get_user_trades(user_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+def get_user_trades(user_id: str, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
     current_user = get_current_user(token)
-    if current_user['id'] != user_id:
+    if current_user['username'] != user_id:
         raise HTTPException(status_code=403, detail="권한이 없습니다.")
-    return crud.get_trade_records(db, user_id)
+    return crud.get_trade_records(db, current_user['id'])
+
+@app.delete("/users/{user_id}/trades/{trade_id}")
+def delete_trade(user_id: str, trade_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    # 1) 로그인 / 권한 체크
+    current_user = get_current_user(token)
+    if current_user["username"] != user_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+
+    # 2) 해당 trade_id가 실제로 user_id에 속하는지 확인
+    record = db.query(models.TradeRecord).filter(
+        models.TradeRecord.id == trade_id,
+        models.TradeRecord.user_id == current_user["id"]
+    ).first()
+
+    if not record:
+        raise HTTPException(status_code=404, detail="해당 거래내역을 찾을 수 없습니다.")
+
+    # 3) 삭제 수행
+    db.delete(record)
+    db.commit()
+    return {"message": "삭제 성공"}
+
+def get_binance_balance(api_key: str, secret: str):
+    exchange = ccxt.binance({
+        'apiKey': api_key,
+        'secret': secret,
+        'enableRateLimit': True,
+        'options': {
+            'defaultType': 'future'
+        }
+    })
+
+    try:
+        balance = exchange.fetch_balance()
+        usdt_balance = balance['total'].get('USDT', 0.0)
+        return round(usdt_balance, 2)
+    except Exception as e:
+        print("❌ 잔고 조회 실패:", e)
+        return None
+    
+@app.get("/users/{user_id}/account-summary")
+def get_account_summary(user_id: str, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    current_user = get_current_user(token)
+    if current_user["username"] != user_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+
+    user = db.query(models.User).filter(models.User.username == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+    # 실시간 잔고 가져오기
+    balance = get_binance_balance(user.binance_key, user.binance_secret)
+
+    return {
+        "balance": balance,
+        "realized_pnl": round(user.total_pnl or 0.0, 2),
+    }
